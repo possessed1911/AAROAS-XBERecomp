@@ -8,6 +8,7 @@ for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -property in
 for /d %%v in ("%VSDIR%\VC\Redist\MSVC\1*") do for /d %%c in ("%%v\x64\Microsoft.VC*.CRT") do set "VCRUNTIME=%%c"
 if not exist "%VCRUNTIME%\vcruntime140.dll" (echo Visual C++ runtime not found: install Visual Studio with the C++ workload & exit /b 1)
 if not exist "%OUT%\%GAME_EXE%.exe" call build.bat || exit /b 1
+if not exist "%OUT%\%GAME_EXE%.dll" call build.bat || exit /b 1
 rem the configure step writes where the SDK is
 if not exist "%OUT%\sdk_dir.txt" cmake --preset release >nul || exit /b 1
 if not exist "%OUT%\sdk_dir.txt" echo %OUT%\sdk_dir.txt was not written, update the SDK. && exit /b 1
@@ -16,11 +17,8 @@ del /q "%GAME_EXE%.zip" 2>nul
 rem an empty assets folder beside the exe, where the game (files or .iso) goes
 rd /s /q "%OUT%\release" 2>nul
 mkdir "%OUT%\release\assets"
-rem only the runtime DLLs the executables import; xbe_recomp.exe needs its own copy, Windows only looks beside the
-rem exe it starts
-del /q "%OUT%\compiler\*.dll" 2>nul
-for %%f in (msvcp140 vcruntime140) do copy /y "%VCRUNTIME%\%%f.dll" "%OUT%\compiler\" >nul
-rem the compiler folder without its work folder: no game code goes in the zip, the first start builds it
+rem ship the precompiled game DLL beside the exe (ensure its timestamp beats the exe across 2s zip granularity)
+powershell -NoProfile -Command "$exe = Get-Item '%OUT%\%GAME_EXE%.exe'; $dll = Get-Item '%OUT%\%GAME_EXE%.dll'; $min = $exe.LastWriteTimeUtc.AddSeconds(4); if ($dll.LastWriteTimeUtc -lt $min) { $now = (Get-Date).ToUniversalTime(); $dll.LastWriteTimeUtc = if ($now -gt $min) { $now } else { $min } }" || exit /b 1
 set "SEVENZ=7z"
 where 7z >nul 2>nul || (
     if exist "%ProgramFiles%\7-Zip\7z.exe" (
@@ -33,4 +31,4 @@ where 7z >nul 2>nul || (
 )
 set "SPLASH_ARG="
 if exist splash.png set "SPLASH_ARG=.\splash.png"
-"%SEVENZ%" a "%GAME_EXE%.zip" ".\%OUT%\%GAME_EXE%.exe" ".\%OUT%\release\assets" ".\%OUT%\compiler" %SPLASH_ARG% .\README.md "%SDK%\THIRD_PARTY.txt" "%VCRUNTIME%\msvcp140.dll" "%VCRUNTIME%\vcruntime140.dll" "%VCRUNTIME%\vcruntime140_1.dll" -xr!work
+"%SEVENZ%" a "%GAME_EXE%.zip" ".\%OUT%\%GAME_EXE%.exe" ".\%OUT%\%GAME_EXE%.dll" ".\%OUT%\release\assets" %SPLASH_ARG% .\README.md "%SDK%\THIRD_PARTY.txt" "%VCRUNTIME%\msvcp140.dll" "%VCRUNTIME%\vcruntime140.dll" "%VCRUNTIME%\vcruntime140_1.dll"

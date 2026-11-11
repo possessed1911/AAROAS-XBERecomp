@@ -232,7 +232,7 @@ join_ip = ""                    # Host IP address for Direct IP System Link
 ### Prebuilt Release (`aa_roas.zip`)
 1. Download the latest `aa_roas.zip` from [GitHub Releases](https://github.com/possessed1911/AAROAS-XBERecomp/releases) and extract it to a folder.
 2. Place your legally acquired game files into the `assets` folder beside `aa_roas.exe` (either as an uncompressed `.iso` image or extracted files containing `default.xbe`).
-3. Run `aa_roas.exe`. On the first launch, the bundled compiler builds `aa_roas.dll` locally from your game image (subsequent launches start immediately).
+3. Run `aa_roas.exe` to launch immediately (`aa_roas.dll` is precompiled and bundled in the release, so no local first-run compilation is needed).
 4. A custom boot splash (`splash.png`) is bundled beside `aa_roas.exe` and can be replaced with your own `.png` or `.bmp` image.
 
 ---
@@ -262,7 +262,7 @@ For subsequent rapid builds after modifying code:
 ```cmd
 build_fast.bat
 ```
-To gather binaries, runtime DLLs, compiler tools, and `splash.png` into a distributable `aa_roas.zip` release archive:
+To gather `aa_roas.exe`, `aa_roas.dll`, runtime DLLs, and `splash.png` into a distributable `aa_roas.zip` release archive:
 ```cmd
 release.bat
 ```
