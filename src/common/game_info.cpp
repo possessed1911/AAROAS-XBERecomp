@@ -75,17 +75,19 @@ static void ReleaseCursorClipLocked() {
 }
 
 static bool CanCaptureLocked(bool check_foreground, bool alt_held) {
+    (void)check_foreground;
     if (!g_mouse_captured || !g_hwnd || !s_window_active) return false;
     if (s_in_size_move || s_in_menu_loop || s_nc_mouse_down || s_wait_client_entry || alt_held) return false;
     if (IsIconic(g_hwnd)) return false;
-    if (check_foreground && GetForegroundWindow() != g_hwnd) return false;
     return true;
 }
 
 static void RefreshUiCursor(HWND hwnd, bool capture_ready) {
     if (!hwnd) return;
-    if (GetForegroundWindow() == hwnd && !IsIconic(hwnd)) {
+    if (GetCurrentThreadId() == GetWindowThreadProcessId(hwnd, nullptr)) {
         SetCursor(capture_ready ? nullptr : LoadCursorW(nullptr, IDC_ARROW));
+    } else {
+        PostMessageW(hwnd, WM_SETCURSOR, reinterpret_cast<WPARAM>(hwnd), MAKELPARAM(HTCLIENT, 0));
     }
 }
 
@@ -161,7 +163,7 @@ static void OnInit() {
 static void OnWindow(void* hwnd) {
     SrwExclusiveGuard lock(g_capture_lock);
     g_hwnd = static_cast<HWND>(hwnd);
-    s_window_active = (g_hwnd != nullptr && GetForegroundWindow() == g_hwnd && !IsIconic(g_hwnd));
+    s_window_active = (g_hwnd != nullptr && !IsIconic(g_hwnd));
     s_in_size_move = false;
     s_in_menu_loop = false;
     s_nc_mouse_down = false;
@@ -175,13 +177,18 @@ static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intpt
     (void)hwnd;
     switch (msg) {
         case WM_SETCURSOR: {
+            LOGI("cursor: WM_SETCURSOR loword=%u hiword=%u wp=%p", LOWORD(lp), HIWORD(lp), (void*)wp);
             if (LOWORD(lp) == HTCLIENT) {
                 SrwExclusiveGuard lock(g_capture_lock);
-                if (CanCaptureLocked(true, IsAltDown())) {
+                const bool can = CanCaptureLocked(true, IsAltDown());
+                LOGI("cursor: WM_SETCURSOR HTCLIENT can=%d", can ? 1 : 0);
+                if (can) {
                     SetCursor(nullptr);
-                    if (result) *result = TRUE;
-                    return true;
+                } else {
+                    SetCursor(LoadCursorW(nullptr, IDC_ARROW));
                 }
+                if (result) *result = TRUE;
+                return true;
             }
             return false;
         }
@@ -211,7 +218,7 @@ static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intpt
             } else {
                 // Keyboard/taskbar activation (WA_ACTIVE) resumes capture immediately; click activation
                 // preserves s_wait_client_entry set by WM_MOUSEACTIVATE on non-client areas.
-                if (LOWORD(wp) == WA_ACTIVE) {
+                if (LOWORD(wp) == WA_ACTIVE || LOWORD(wp) == WA_CLICKACTIVE) {
                     s_nc_mouse_down = false;
                     s_wait_client_entry = false;
                 }
@@ -243,6 +250,8 @@ static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intpt
         case WM_SETFOCUS: {
             SrwExclusiveGuard lock(g_capture_lock);
             s_window_active = (g_hwnd != nullptr && !IsIconic(g_hwnd));
+            s_nc_mouse_down = false;
+            s_wait_client_entry = false;
             ResetMouseLookStateLocked();
             RefreshUiCursor(g_hwnd, CanCaptureLocked(false, IsAltDown()));
             break;
@@ -298,22 +307,36 @@ static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intpt
             RefreshUiCursor(g_hwnd, CanCaptureLocked(false, IsAltDown()));
             break;
         }
-        case WM_SYSKEYDOWN:
+        case WM_SYSKEYDOWN: {
+            if (wp == VK_RETURN && ((lp & (1 << 29)) != 0 || IsAltDown()) && !(lp & (1 << 30))) {
+                app::Settings& s = app::Get();
+                if (s.display_mode == app::DisplayMode::Windowed) {
+                    s.display_mode = app::DisplayMode::Borderless;
+                } else {
+                    s.display_mode = app::DisplayMode::Windowed;
+                }
+                LOGI("display: Alt+Enter toggled mode to %u", static_cast<uint32_t>(s.display_mode));
+                app::ApplyDisplay();
+                app::Save();
+                if (result) *result = 0;
+                return true;
+            }
+            if (wp == VK_MENU) {
+                SrwExclusiveGuard lock(g_capture_lock);
+                ReleaseCaptureUiLocked(g_hwnd);
+            }
+            break;
+        }
         case WM_SYSKEYUP:
         case WM_KEYUP: {
             if (wp == VK_MENU) {
                 SrwExclusiveGuard lock(g_capture_lock);
-                const bool alt_down = (msg == WM_SYSKEYDOWN);
-                if (alt_down) {
-                    ReleaseCaptureUiLocked(g_hwnd);
-                } else {
-                    RECT clip_rc{};
-                    POINT pt{};
-                    const bool in_client = GetScreenClientRect(g_hwnd, clip_rc) && GetCursorPos(&pt) && PtInRect(&clip_rc, pt) != FALSE;
-                    if (!in_client) s_wait_client_entry = true;
-                    ResetMouseLookStateLocked();
-                    RefreshUiCursor(g_hwnd, CanCaptureLocked(false, false));
-                }
+                RECT clip_rc{};
+                POINT pt{};
+                const bool in_client = GetScreenClientRect(g_hwnd, clip_rc) && GetCursorPos(&pt) && PtInRect(&clip_rc, pt) != FALSE;
+                if (!in_client) s_wait_client_entry = true;
+                ResetMouseLookStateLocked();
+                RefreshUiCursor(g_hwnd, CanCaptureLocked(false, false));
             }
             break;
         }
@@ -380,68 +403,94 @@ static void HandlePad(int port, input::Pad& pad) {
         is_foreground = (g_hwnd == nullptr || (GetForegroundWindow() == g_hwnd && !IsIconic(g_hwnd)));
         mouse_captured_snapshot = g_mouse_captured;
 
+        static thread_local bool t_desktop_attached = false;
+        if (!t_desktop_attached) {
+            HDESK desk = OpenInputDesktop(0, FALSE, 0x01FF);
+            if (desk) {
+                SetThreadDesktop(desk);
+                CloseDesktop(desk);
+            }
+            t_desktop_attached = true;
+        }
+
         RECT clip_rc{};
         POINT cur{};
         const bool has_client_rect = GetScreenClientRect(g_hwnd, clip_rc);
-        const bool has_cursor = has_client_rect && GetCursorPos(&cur);
-        if (s_wait_client_entry && has_cursor && PtInRect(&clip_rc, cur) != FALSE) {
+        bool has_cur_pos = has_client_rect && GetCursorPos(&cur);
+        if (!has_cur_pos && has_client_rect) {
+            HDESK desk = OpenInputDesktop(0, FALSE, 0x01FF);
+            if (desk) {
+                SetThreadDesktop(desk);
+                CloseDesktop(desk);
+                has_cur_pos = GetCursorPos(&cur);
+            }
+        }
+        if (s_wait_client_entry && has_cur_pos && PtInRect(&clip_rc, cur) != FALSE) {
             s_wait_client_entry = false;
         }
 
-        if (has_cursor && CanCaptureLocked(true, alt_held)) {
-            const POINT screen_center = {(clip_rc.left + clip_rc.right) / 2,
-                                         (clip_rc.top + clip_rc.bottom) / 2};
+        const bool can_capture = CanCaptureLocked(true, alt_held);
 
-            int dx = cur.x - screen_center.x;
-            int dy = cur.y - screen_center.y;
-
-            const bool first_capture = !s_was_captured;
-            // Clip cursor to client area while active and reset it to center for relative deltas.
-            ClipCursor(&clip_rc);
-            s_cursor_clipped = true;
-            SetCursorPos(screen_center.x, screen_center.y);
-
-            if (first_capture) {
-                // Discard the first delta after regaining focus/capture so the camera never snaps.
-                s_was_captured = true;
-                dx = 0;
-                dy = 0;
-                s_smooth_rx = 0.0f;
-                s_smooth_ry = 0.0f;
-                // Trigger UI thread WM_SETCURSOR so Alt-Tab return hides arrow immediately even if stationary.
-                notify_cursor_hwnd = g_hwnd;
+        if (can_capture) {
+            if (has_client_rect) {
+                ClipCursor(&clip_rc);
+                s_cursor_clipped = true;
             }
 
-            // Compensate for UE2's slower vertical look multiplier (xboxuser.ini 150 yaw vs 100 pitch).
-            constexpr float kVerticalAimScale = 1.5f;
-            const float sens = 850.0f * g_mouse_sensitivity.load(std::memory_order_relaxed);
-            const bool invert_y = g_mouse_invert_y.load(std::memory_order_relaxed);
+            if (has_cur_pos && has_client_rect) {
+                const POINT screen_center = {(clip_rc.left + clip_rc.right) / 2,
+                                             (clip_rc.top + clip_rc.bottom) / 2};
 
-            const float target_rx = MouseDeltaToStick(dx, sens, 1.0f, (dx > 0) ? 1.0f : -1.0f);
-            float y_sign = (dy < 0) ? 1.0f : -1.0f;
-            if (invert_y) y_sign = -y_sign;
-            const float target_ry = MouseDeltaToStick(dy, sens, kVerticalAimScale, y_sign);
+                int dx = cur.x - screen_center.x;
+                int dy = cur.y - screen_center.y;
 
-            SmoothStickAxis(dx, target_rx, s_smooth_rx);
-            SmoothStickAxis(dy, target_ry, s_smooth_ry);
+                const bool first_capture = !s_was_captured;
+                // Clip cursor to client area while active and reset it to center for relative deltas.
+                SetCursorPos(screen_center.x, screen_center.y);
 
-            if (dx != 0 || dy != 0 ||
-                std::abs(s_smooth_rx) > 100.0f || std::abs(s_smooth_ry) > 100.0f) {
-                pad.rx = static_cast<int16_t>(std::clamp(static_cast<int>(s_smooth_rx), -32768, 32767));
-                pad.ry = static_cast<int16_t>(std::clamp(static_cast<int>(s_smooth_ry), -32768, 32767));
-                kb_used = true;
-            }
+                if (first_capture) {
+                    // Discard the first delta after regaining focus/capture so the camera never snaps.
+                    s_was_captured = true;
+                    dx = 0;
+                    dy = 0;
+                    s_smooth_rx = 0.0f;
+                    s_smooth_ry = 0.0f;
+                    // Trigger UI thread WM_SETCURSOR so Alt-Tab return hides arrow immediately even if stationary.
+                    notify_cursor_hwnd = g_hwnd;
+                }
 
-            // Mouse buttons (only while actively captured inside client area)
-            if (is_foreground && !alt_held) {
-                if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0) { pad.analog[7] = 0xFF; kb_used = true; } // Fire (RT)
-                if ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0) { pad.analog[6] = 0xFF; kb_used = true; } // ADS (LT)
-                if ((GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0) { pad.buttons |= 0x0080; kb_used = true; } // Melee / Zoom (RS)
+                // Compensate for UE2's slower vertical look multiplier (xboxuser.ini 150 yaw vs 100 pitch).
+                constexpr float kVerticalAimScale = 1.5f;
+                const float sens = 850.0f * g_mouse_sensitivity.load(std::memory_order_relaxed);
+                const bool invert_y = g_mouse_invert_y.load(std::memory_order_relaxed);
+
+                const float target_rx = MouseDeltaToStick(dx, sens, 1.0f, (dx > 0) ? 1.0f : -1.0f);
+                float y_sign = (dy < 0) ? 1.0f : -1.0f;
+                if (invert_y) y_sign = -y_sign;
+                const float target_ry = MouseDeltaToStick(dy, sens, kVerticalAimScale, y_sign);
+
+                SmoothStickAxis(dx, target_rx, s_smooth_rx);
+                SmoothStickAxis(dy, target_ry, s_smooth_ry);
+
+                if (dx != 0 || dy != 0 ||
+                    std::abs(s_smooth_rx) > 100.0f || std::abs(s_smooth_ry) > 100.0f) {
+                    pad.rx = static_cast<int16_t>(std::clamp(static_cast<int>(s_smooth_rx), -32768, 32767));
+                    pad.ry = static_cast<int16_t>(std::clamp(static_cast<int>(s_smooth_ry), -32768, 32767));
+                    kb_used = true;
+                }
+
+                // Mouse buttons (only while actively captured inside client area)
+                if (is_foreground && !alt_held) {
+                    if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0) { pad.analog[7] = 0xFF; kb_used = true; } // Fire (RT)
+                    if ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0) { pad.analog[6] = 0xFF; kb_used = true; } // ADS (LT)
+                    if ((GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0) { pad.buttons |= 0x0080; kb_used = true; } // Melee / Zoom (RS)
+                }
             }
         } else {
             const bool was_clipped = s_cursor_clipped;
             ResetMouseLookStateLocked();
             ReleaseCursorClipLocked();
+            RefreshUiCursor(g_hwnd, false);
             if (was_clipped && g_hwnd && is_foreground) {
                 notify_cursor_hwnd = g_hwnd;
             }

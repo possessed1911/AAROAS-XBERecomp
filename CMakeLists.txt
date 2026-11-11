@@ -38,6 +38,10 @@ endif()
 # target name = GAME_EXE in build.bat, xbe = GAME_XBE
 add_xbe_image(aa_roas default.xbe game.toml ${GAME_PARTITIONS} game)
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/app.rc)
+    target_sources(aa_roas PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app.rc)
+endif()
+
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/splash.png)
     add_custom_command(TARGET aa_roas POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
