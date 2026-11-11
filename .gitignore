@@ -1,0 +1,42 @@
+# Build artifacts and binaries
+/out/
+/build/
+*.zip
+*.pdb
+*.exe
+*.dll
+*.obj
+*.o
+*.lib
+*.exp
+*.ilk
+
+# Crash dumps and logs
+*.dmp
+*.log
+/logs/
+/CrashDumps/
+
+# Recompiled code (derived from the game at build time)
+/generated/
+
+# User game assets (never commit retail Xbox assets!)
+/assets/
+
+# Runtime generation and caches
+settings.toml
+/hdd/
+/captures/
+/textures/dumps/
+
+# Editors and IDEs
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Local temporary folders and tooling
+.local/
+.agents/
+ecc-install.json
