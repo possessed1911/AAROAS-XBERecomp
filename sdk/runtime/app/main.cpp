@@ -33,8 +33,11 @@ namespace {
 
 HWND g_hwnd = nullptr;
 constexpr UINT kApplyDisplay = WM_APP + 1, kOpenWindow = WM_APP + 2;
+constexpr UINT kSetCursorVisible = WM_APP + 3;
 bool g_mode_changed = false;
 bool g_apply_posted = false;  // a display apply is waiting in the queue or running
+WINDOWPLACEMENT g_prev_wp{sizeof(WINDOWPLACEMENT)};
+bool g_has_prev_wp = false;
 
 // crash dump in CrashDumps beside the exe
 LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS* e) {
@@ -77,9 +80,33 @@ void DumpThreads() {
         }
 }
 
+void ForceForeground(HWND hwnd) {
+    if (!hwnd) return;
+    HWND fg = GetForegroundWindow();
+    if (fg == hwnd) return;
+    DWORD fg_thread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    DWORD my_thread = GetCurrentThreadId();
+    keybd_event(VK_MENU, 0, 0, 0);
+    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+    if (fg_thread != 0 && fg_thread != my_thread) {
+        AttachThreadInput(my_thread, fg_thread, TRUE);
+        ShowWindow(hwnd, SW_SHOW);
+        BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd);
+        AttachThreadInput(my_thread, fg_thread, FALSE);
+    } else {
+        ShowWindow(hwnd, SW_SHOW);
+        BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd);
+    }
+}
+
 // window thread only
 void ApplyNow() {
+    ClipCursor(nullptr);
+    SetCursor(nullptr);
     const Settings& s = Get();
+    LOGI("display: ApplyNow mode=%u hwnd=%p", static_cast<uint32_t>(s.display_mode), g_hwnd);
     HMONITOR mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFOEXW mi{};
     mi.cbSize = sizeof(mi);
@@ -89,7 +116,9 @@ void ApplyNow() {
         g_mode_changed = false;
     }
     Mode out = Output();
-    LONG_PTR visible = IsWindowVisible(g_hwnd) ? WS_VISIBLE : 0;  // a window held back for a splash or handover stays so
+    LONG_PTR visible = WS_VISIBLE;
+    LONG_PTR current_style = GetWindowLongPtrW(g_hwnd, GWL_STYLE);
+
     DEVMODEW desktop{};
     desktop.dmSize = sizeof(desktop);
     EnumDisplaySettingsW(mi.szDevice, ENUM_REGISTRY_SETTINGS, &desktop);
@@ -105,18 +134,54 @@ void ApplyNow() {
         GetMonitorInfoW(mon, &mi);
     }
     if (s.display_mode == DisplayMode::Windowed) {
-        RECT r{0, 0, LONG(out.width), LONG(out.height)};
-        AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-        int w = r.right - r.left, h = r.bottom - r.top;
-        const RECT& a = mi.rcWork;
         SetWindowLongPtrW(g_hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | visible);
-        SetWindowPos(g_hwnd, HWND_NOTOPMOST, a.left + (a.right - a.left - w) / 2, a.top + (a.bottom - a.top - h) / 2, w, h,
-                     SWP_FRAMECHANGED);
+        if (g_has_prev_wp) {
+            const RECT& a = mi.rcWork;
+            if (g_prev_wp.rcNormalPosition.top < a.top) {
+                int h = g_prev_wp.rcNormalPosition.bottom - g_prev_wp.rcNormalPosition.top;
+                g_prev_wp.rcNormalPosition.top = a.top;
+                g_prev_wp.rcNormalPosition.bottom = a.top + h;
+            }
+            SetWindowPlacement(g_hwnd, &g_prev_wp);
+            SetWindowPos(g_hwnd, HWND_TOP, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        } else {
+            const RECT& a = mi.rcWork;
+            int max_w = std::max<int>(100, (a.right - a.left) - 32);
+            int max_h = std::max<int>(100, (a.bottom - a.top) - 64);
+            int target_cw = (s.width && s.height) ? static_cast<int>(s.width) : 1280;
+            int target_ch = (s.width && s.height) ? static_cast<int>(s.height) : 720;
+            if (target_cw > max_w || target_ch > max_h) {
+                float scale = std::min(float(max_w) / float(target_cw), float(max_h) / float(target_ch));
+                target_cw = std::max(100, static_cast<int>(target_cw * scale));
+                target_ch = std::max(100, static_cast<int>(target_ch * scale));
+            }
+            RECT r{0, 0, target_cw, target_ch};
+            AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+            int w = r.right - r.left, h = r.bottom - r.top;
+            int x = a.left + (a.right - a.left - w) / 2;
+            int y = a.top + (a.bottom - a.top - h) / 2;
+            if (y < a.top) y = a.top;
+            if (x < a.left) x = a.left;
+            SetWindowPos(g_hwnd, HWND_NOTOPMOST, x, y, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        }
     } else {
+        if (current_style & WS_OVERLAPPEDWINDOW) {
+            g_prev_wp.length = sizeof(WINDOWPLACEMENT);
+            if (GetWindowPlacement(g_hwnd, &g_prev_wp)) {
+                g_has_prev_wp = true;
+                if (g_prev_wp.showCmd == SW_SHOWMINIMIZED) {
+                    g_prev_wp.showCmd = SW_SHOWNORMAL;
+                }
+            }
+        }
         const RECT& m = mi.rcMonitor;
         SetWindowLongPtrW(g_hwnd, GWL_STYLE, WS_POPUP | visible);
-        SetWindowPos(g_hwnd, HWND_NOTOPMOST, m.left, m.top, m.right - m.left, m.bottom - m.top, SWP_FRAMECHANGED);
+        SetWindowPos(g_hwnd, HWND_TOPMOST, m.left, m.top, m.right - m.left, m.bottom - m.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
     }
+    ShowWindow(g_hwnd, SW_SHOWNORMAL);
+    BringWindowToTop(g_hwnd);
+    ForceForeground(g_hwnd);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -141,13 +206,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_mode_changed = false;
                     ShowWindow(hwnd, SW_MINIMIZE);
                 }
-            } else if (Get().display_mode == DisplayMode::Fullscreen && Get().width && Get().height && !g_mode_changed &&
-                       IsWindowVisible(hwnd) && !g_apply_posted) {
-                // once: restoring the window activates it again from inside the apply, and a second apply switched
-                // the mode back and forth, after which presents were not taken for a while (the game stood still
-                // until the next alt-tab)
-                g_apply_posted = true;
-                PostMessageW(hwnd, kApplyDisplay, 0, 0);
+            } else {
+                ForceForeground(hwnd);
+                if (Get().display_mode == DisplayMode::Fullscreen && Get().width && Get().height && !g_mode_changed &&
+                    IsWindowVisible(hwnd) && !g_apply_posted) {
+                    // once: restoring the window activates it again from inside the apply, and a second apply switched
+                    // the mode back and forth, after which presents were not taken for a while (the game stood still
+                    // until the next alt-tab)
+                    g_apply_posted = true;
+                    PostMessageW(hwnd, kApplyDisplay, 0, 0);
+                }
             }
             break;
         case kApplyDisplay:
@@ -155,11 +223,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             ApplyNow();
             g_apply_posted = false;
             return 0;
+        case kSetCursorVisible:
+            LOGI("cursor: kSetCursorVisible(%llu) tid=%lu", wp, GetCurrentThreadId());
+            if (wp) {
+                SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+            } else {
+                SetCursor(nullptr);
+            }
+            return 0;
         case kOpenWindow:
+            LOGI("cursor: kOpenWindow tid=%lu", GetCurrentThreadId());
             CloseSplash();
             if (wp) ApplyNow();
+            ShowWindow(hwnd, SW_SHOWNORMAL);
             ShowWindow(hwnd, SW_SHOW);
-            SetForegroundWindow(hwnd);
+            SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            ForceForeground(hwnd);
+            SetCursor(nullptr);
             return 0;
         case WM_CLOSE:
             DestroyWindow(hwnd);
@@ -244,6 +324,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     std::signal(SIGABRT, [](int) { app::WriteCrashDump(nullptr); });
     timeBeginPeriod(1);
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, (PVOID)0, SPIF_SENDCHANGE);
+    LockSetForegroundWindow(LSFW_UNLOCK);
+    AllowSetForegroundWindow(ASFW_ANY);
     // one log a session: a relaunch into another image carries on its predecessor's
     bool relaunched = std::wcsstr(GetCommandLineW(), L"--relaunched") != nullptr;
     std::string log = app::kGame.log;
@@ -265,24 +348,29 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     wc.lpfnWndProc = app::WndProc;
     wc.hInstance = inst;
     wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(1));
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     wc.lpszClassName = app::kGame.name;
     RegisterClassExW(&wc);
     app::g_hwnd = CreateWindowExW(0, wc.lpszClassName, app::kGame.title, WS_POPUP, 0, 0, 1280, 720,
                                   nullptr, nullptr, inst, nullptr);
+    // Consume any STARTF_USESHOWWINDOW flag so subsequent ShowWindow calls are never overridden with SW_HIDE
+    ShowWindow(app::g_hwnd, SW_HIDE);
     // behind a splash the window stays hidden until the game's first frame; handed over, it is set up hidden
     if (handover) {
         app::ApplyNow();
     } else if (!splash) {
         app::ApplyNow();
+        ShowWindow(app::g_hwnd, SW_SHOWNORMAL);
         ShowWindow(app::g_hwnd, SW_SHOW);
+        app::ForceForeground(app::g_hwnd);
     }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_NoMouseCursorChange;
     ImGui_ImplWin32_Init(app::g_hwnd);
 
     input::Init();
