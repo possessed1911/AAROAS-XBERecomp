@@ -21,6 +21,16 @@ rem exe it starts
 del /q "%OUT%\compiler\*.dll" 2>nul
 for %%f in (msvcp140 vcruntime140) do copy /y "%VCRUNTIME%\%%f.dll" "%OUT%\compiler\" >nul
 rem the compiler folder without its work folder: no game code goes in the zip, the first start builds it
+set "SEVENZ=7z"
+where 7z >nul 2>nul || (
+    if exist "%ProgramFiles%\7-Zip\7z.exe" (
+        set "SEVENZ=%ProgramFiles%\7-Zip\7z.exe"
+    ) else if exist "%ProgramFiles(x86)%\7-Zip\7z.exe" (
+        set "SEVENZ=%ProgramFiles(x86)%\7-Zip\7z.exe"
+    ) else (
+        echo 7-Zip not found: install 7-Zip or add 7z.exe to PATH & exit /b 1
+    )
+)
 set "SPLASH_ARG="
 if exist splash.png set "SPLASH_ARG=.\splash.png"
-7z a "%GAME_EXE%.zip" ".\%OUT%\%GAME_EXE%.exe" ".\%OUT%\release\assets" ".\%OUT%\compiler" %SPLASH_ARG% .\README.md "%SDK%\THIRD_PARTY.txt" "%VCRUNTIME%\msvcp140.dll" "%VCRUNTIME%\vcruntime140.dll" "%VCRUNTIME%\vcruntime140_1.dll" -xr!work
+"%SEVENZ%" a "%GAME_EXE%.zip" ".\%OUT%\%GAME_EXE%.exe" ".\%OUT%\release\assets" ".\%OUT%\compiler" %SPLASH_ARG% .\README.md "%SDK%\THIRD_PARTY.txt" "%VCRUNTIME%\msvcp140.dll" "%VCRUNTIME%\vcruntime140.dll" "%VCRUNTIME%\vcruntime140_1.dll" -xr!work

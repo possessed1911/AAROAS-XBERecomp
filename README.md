@@ -229,10 +229,11 @@ join_ip = ""                    # Host IP address for Direct IP System Link
 - **GPU**: Direct3D 12 compatible graphics card (DirectX Feature Level 11_0+)
 - **Storage**: ~4 GB free disk space for game assets and recompiled binaries
 
-### Steps
-1. Place your legally acquired game files into the `assets` folder (either as an uncompressed `.iso` image or extracted files containing `default.xbe`).
-2. Run `aa_roas.exe` (found in `out\build\release\`).
-3. *(Optional)* Add a `splash.png` or `splash.bmp` beside `aa_roas.exe` to display a custom loading splash screen.
+### Prebuilt Release (`aa_roas.zip`)
+1. Download the latest `aa_roas.zip` from [GitHub Releases](https://github.com/possessed1911/AAROAS-XBERecomp/releases) and extract it to a folder.
+2. Place your legally acquired game files into the `assets` folder beside `aa_roas.exe` (either as an uncompressed `.iso` image or extracted files containing `default.xbe`).
+3. Run `aa_roas.exe`. On the first launch, the bundled compiler builds `aa_roas.dll` locally from your game image (subsequent launches start immediately).
+4. A custom boot splash (`splash.png`) is bundled beside `aa_roas.exe` and can be replaced with your own `.png` or `.bmp` image.
 
 ---
 
@@ -244,9 +245,11 @@ join_ip = ""                    # Host IP address for Direct IP System Link
 - [CMake 3.25+](https://cmake.org/) and [Ninja](https://ninja-build.org/) added to `PATH`
 - Visual Studio 2022 or Build Tools with the **Desktop development with C++** workload
 
-### 2. Prepare Game Assets
-Link or copy your extracted game folder into `assets`:
+### 2. Clone & Prepare Game Assets
+Clone the repository and link or copy your extracted game folder into `assets`:
 ```cmd
+git clone https://github.com/possessed1911/AAROAS-XBERecomp.git
+cd AAROAS-XBERecomp
 mklink /J assets "D:\Games\AmericasArmy"
 ```
 
@@ -259,7 +262,11 @@ For subsequent rapid builds after modifying code:
 ```cmd
 build_fast.bat
 ```
-The output binaries (`aa_roas.exe` and `aa_roas.dll`) are placed in `out\build\release\`.
+To gather binaries, runtime DLLs, compiler tools, and `splash.png` into a distributable `aa_roas.zip` release archive:
+```cmd
+release.bat
+```
+The compiled binaries (`aa_roas.exe` and `aa_roas.dll`) are placed in `out\build\release\`.
 
 ---
 
