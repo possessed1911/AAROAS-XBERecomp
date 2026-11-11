@@ -266,6 +266,10 @@ To gather `aa_roas.exe`, `aa_roas.dll`, runtime DLLs, and `splash.png` into a di
 ```cmd
 release.bat
 ```
+To package `aa_roas.zip` and automatically create a GitHub release (or update an existing release's **Assets**) via the GitHub CLI (`gh`):
+```cmd
+publish_release.bat v1.0.0.1 "v1.0.0.1 — Release Title"
+```
 The compiled binaries (`aa_roas.exe` and `aa_roas.dll`) are placed in `out\build\release\`.
 
 ---
