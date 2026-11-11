@@ -103,9 +103,13 @@ Unlike conventional arcade shooters, *Rise of a Soldier* emphasizes authentic mi
 | **Confirm / Select** | `Enter` | Start Button / A Button |
 | **Squad Commands (D-Pad)** | Arrow Keys (`↑` `↓` `←` `→`) or `Z` / `X` | D-Pad Buttons |
 | **Toggle Cursor Lock** | **`F1`** | *(Toggles mouse lock on/off)* |
+| **Toggle Display Mode** | **`Alt + Enter`** | *(Toggles windowed / borderless fullscreen)* |
 
 > [!TIP]
-> Pressing **`F1`** frees the mouse cursor so you can navigate to other monitors or windows. Clicking anywhere inside the game window automatically re-engages mouse lock.
+> - Press **`Alt + Enter`** at any time to seamlessly toggle between windowed mode and borderless fullscreen.
+> - The mouse cursor is automatically locked and hidden during gameplay in both windowed and fullscreen modes.
+> - When you **Alt-Tab**, minimize, or defocus the game window, the cursor is automatically freed and restored to a standard arrow.
+> - Clicking back into the game window automatically re-engages mouse lock and re-hides the cursor. You can also press **`F1`** at any time to toggle mouse capture manually.
 
 ### Controller (Gamepad)
 
