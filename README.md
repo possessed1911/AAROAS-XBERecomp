@@ -89,19 +89,20 @@ Unlike conventional arcade shooters, *Rise of a Soldier* emphasizes authentic mi
 | **Look / Aim** | **Mouse Movement** | Right Analog Stick |
 | **Fire** | **Left Mouse Button (LMB)** | Right Trigger (RT) |
 | **Aim Down Sights (ADS)** | **Right Mouse Button (RMB)** | Left Trigger (LT) |
-| **Melee / Steady Aim / Zoom** | **Middle Mouse Button (MMB)** or `V` | Right Stick Click (RS / R3) |
-| **Cycle Weapon / Sidearm** | **Mouse Wheel Scroll** or `Q` / `F` / `1` / `2` | Y Button |
+| **Scope / Zoom** | `V` or `Right Shift` | Right Stick Click (RS / R3) |
+| **Loadout / Cycle Weapon** | **Mouse Wheel Scroll** or `F` / `1` / `2` | Y Button |
 | **Movement / Strafe** | `W` / `A` / `S` / `D` | Left Analog Stick |
-| **Vault / Jump / Action / Select** | `Space` or `E` | A Button |
-| **Crouch / Prone / Cancel** | `C` or `Left Ctrl` | B Button |
+| **Vault / Jump / Action / Select** | `Space` or `Enter` | A Button |
+| **Command / Menu Cancel** | `Tab` or `Backspace` | B Button |
 | **Reload** | `R` | X Button |
-| **Grenade / Special Equipment** | `G` or `3` | White Button |
-| **Fire Mode Selector** | `B` or `4` or `X` | Black Button |
+| **SAM / Grenade / Equipment** | `G` or `3` | White Button |
+| **SAM / Fire Mode** | `B` or `4` or `X` | Black Button |
 | **Sprint** | `Left Shift` | Left Stick Click (LS / L3) |
-| **Objectives / Scoreboard** | `Tab` | Back Button |
+| **Fire Rate** | **Middle Mouse Button (MMB)** | Back Button |
 | **Pause / In-Game Menu** | `Escape` | Start Button |
 | **Confirm / Select** | `Enter` | Start Button / A Button |
-| **Squad Commands (D-Pad)** | Arrow Keys (`↑` `↓` `←` `→`) or `Z` / `X` | D-Pad Buttons |
+| **Stance (Stand / Crouch / Prone)** | `C` / `Left Ctrl` (Down) or `↑` / `↓` | D-Pad Up / Down |
+| **Lean Left / Right** | `Q` / `E` or `←` / `→` (`Z` Left) | D-Pad Left / Right |
 | **Toggle Cursor Lock** | **`F1`** | *(Toggles mouse lock on/off)* |
 | **Toggle Display Mode** | **`Alt + Enter`** | *(Toggles windowed / borderless fullscreen)* |
 

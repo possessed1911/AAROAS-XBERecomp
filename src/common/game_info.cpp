@@ -76,8 +76,9 @@ static void ReleaseCursorClipLocked() {
 
 static bool CanCaptureLocked(bool check_foreground, bool alt_held) {
     (void)check_foreground;
+    (void)alt_held;
     if (!g_mouse_captured || !g_hwnd || !s_window_active) return false;
-    if (s_in_size_move || s_in_menu_loop || s_nc_mouse_down || s_wait_client_entry || alt_held) return false;
+    if (s_in_size_move || s_in_menu_loop || s_nc_mouse_down || s_wait_client_entry) return false;
     if (IsIconic(g_hwnd)) return false;
     return true;
 }
@@ -321,23 +322,6 @@ static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intpt
                 if (result) *result = 0;
                 return true;
             }
-            if (wp == VK_MENU) {
-                SrwExclusiveGuard lock(g_capture_lock);
-                ReleaseCaptureUiLocked(g_hwnd);
-            }
-            break;
-        }
-        case WM_SYSKEYUP:
-        case WM_KEYUP: {
-            if (wp == VK_MENU) {
-                SrwExclusiveGuard lock(g_capture_lock);
-                RECT clip_rc{};
-                POINT pt{};
-                const bool in_client = GetScreenClientRect(g_hwnd, clip_rc) && GetCursorPos(&pt) && PtInRect(&clip_rc, pt) != FALSE;
-                if (!in_client) s_wait_client_entry = true;
-                ResetMouseLookStateLocked();
-                RefreshUiCursor(g_hwnd, CanCaptureLocked(false, false));
-            }
             break;
         }
         case WM_LBUTTONDOWN:
@@ -483,7 +467,7 @@ static void HandlePad(int port, input::Pad& pad) {
                 if (is_foreground && !alt_held) {
                     if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0) { pad.analog[7] = 0xFF; kb_used = true; } // Fire (RT)
                     if ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0) { pad.analog[6] = 0xFF; kb_used = true; } // ADS (LT)
-                    if ((GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0) { pad.buttons |= 0x0080; kb_used = true; } // Melee / Zoom (RS)
+                    if ((GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0) { pad.buttons |= 0x0020; kb_used = true; } // Fire Rate (BACK)
                 }
             }
         } else {
@@ -532,34 +516,32 @@ static void HandlePad(int port, input::Pad& pad) {
     }
 
     // 3. Actions / Weapons / Equipment
-    // A button: Jump, Vault, Interact, Menu Select
-    if (is_down(VK_SPACE) || is_down('E') || is_down(VK_RETURN)) { pad.analog[0] = 0xFF; kb_used = true; }
-    // B button: Crouch / Prone, Cancel
-    if (is_down('C') || is_down(VK_LCONTROL) || is_down(VK_BACK)) { pad.analog[1] = 0xFF; kb_used = true; }
+    // A button: Action (Jump, Vault, Interact, Menu Select)
+    if (is_down(VK_SPACE) || is_down(VK_RETURN)) { pad.analog[0] = 0xFF; kb_used = true; }
+    // B button: Command, Menu Cancel
+    if (is_down(VK_TAB) || is_down(VK_BACK)) { pad.analog[1] = 0xFF; kb_used = true; }
     // X button: Reload
     if (is_down('R')) { pad.analog[2] = 0xFF; kb_used = true; }
-    // Y button: Cycle Weapon / Sidearm
-    if (is_down('Q') || is_down('F') || is_down('1') || is_down('2')) { pad.analog[3] = 0xFF; kb_used = true; }
-    // Black button: Fire Mode selector
+    // Y button: Loadout / Cycle Weapon / Sidearm
+    if (is_down('F') || is_down('1') || is_down('2')) { pad.analog[3] = 0xFF; kb_used = true; }
+    // Black button: SAM / Fire Mode
     if (is_down('B') || is_down('4') || is_down('X')) { pad.analog[4] = 0xFF; kb_used = true; }
-    // White button: Grenade / Equipment
+    // White button: SAM / Grenade / Equipment
     if (is_down('G') || is_down('3')) { pad.analog[5] = 0xFF; kb_used = true; }
     // Left Stick Click: Sprint
     if (is_down(VK_LSHIFT)) { pad.buttons |= 0x0040; kb_used = true; }
-    // Right Stick Click: Melee / Steady Aim
-    if (is_down('V')) { pad.buttons |= 0x0080; kb_used = true; }
+    // Right Stick Click: Scope
+    if (is_down('V') || is_down(VK_RSHIFT)) { pad.buttons |= 0x0080; kb_used = true; }
 
     // 4. Menu & System Controls
     // START: Pause / In-Game Menu
     if (is_down(VK_ESCAPE) || is_down(VK_RETURN)) { pad.buttons |= 0x0010; kb_used = true; }
-    // BACK: Objectives / Scoreboard
-    if (is_down(VK_TAB)) { pad.buttons |= 0x0020; kb_used = true; }
 
-    // 5. Squad Commands / D-Pad
+    // 5. Stance & Lean / D-Pad (Up/Down = Stance, Left/Right = Lean)
     if (is_down(VK_UP)) { pad.buttons |= 0x0001; kb_used = true; }
-    if (is_down(VK_DOWN)) { pad.buttons |= 0x0002; kb_used = true; }
-    if (is_down(VK_LEFT) || is_down('Z')) { pad.buttons |= 0x0004; kb_used = true; }
-    if (is_down(VK_RIGHT)) { pad.buttons |= 0x0008; kb_used = true; }
+    if (is_down(VK_DOWN) || is_down('C') || is_down(VK_LCONTROL)) { pad.buttons |= 0x0002; kb_used = true; }
+    if (is_down(VK_LEFT) || is_down('Q') || is_down('Z')) { pad.buttons |= 0x0004; kb_used = true; }
+    if (is_down(VK_RIGHT) || is_down('E')) { pad.buttons |= 0x0008; kb_used = true; }
 
     // Check environment variable or auto-press for self-test
     static int s_auto_start = -1;
