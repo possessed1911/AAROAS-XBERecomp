@@ -1,7 +1,17 @@
 # America's Army: Rise of a Soldier (original Xbox), statically recompiled
 
 cmake_minimum_required(VERSION 3.25)
+
+find_program(SCCACHE_PROGRAM sccache
+    HINTS "$ENV{LOCALAPPDATA}/Microsoft/WinGet/Links")
+if(SCCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER "${SCCACHE_PROGRAM}" CACHE STRING "" FORCE)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${SCCACHE_PROGRAM}" CACHE STRING "" FORCE)
+endif()
+
 project(aa_roas LANGUAGES C CXX)
+add_compile_options(-U_DLL -D_MT)
+set(CMAKE_CXX_VISIBILITY_PRESET default)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -632,10 +632,6 @@ std::atomic<uint32_t> g_presents{0};
 }  // namespace
 
 HLE_STDCALL(D3DDevice_Swap, 1) {
-    static uint32_t s_swap_cnt = 0;
-    if (s_swap_cnt++ < 10 || (s_swap_cnt % 60 == 0)) {
-        LOGI("d3d: D3DDevice_Swap #%u, dev_rt=%08X front=%08X back=%08X", s_swap_cnt, Dev(kDevRenderTarget), g_buffers[0], g_buffers[1]);
-    }
     app::SplashFirstFrame();
     // handed over from the previous instance: the window opens on the second frame, the first picture with
     // anything drawn over it right after
@@ -676,10 +672,6 @@ HLE_STDCALL(D3DDevice_Swap, 1) {
 }
 
 HLE_STDCALL(D3DDevice_Clear, 6) {
-    static uint32_t s_clear_cnt = 0;
-    if (s_clear_cnt++ < 10 || (s_clear_cnt % 60 == 0)) {
-        LOGI("d3d: D3DDevice_Clear #%u, flags=%08X color=%08X", s_clear_cnt, a[2], a[3]);
-    }
     std::lock_guard<std::recursive_mutex> lock(g_lock);
     const uint8_t* rects = a[0] && a[1] ? static_cast<const uint8_t*>(HostPtr(a[1])) : nullptr;
     if (g_backend) g_backend->Clear(g_state, a[0], rects, a[2], a[3], ArgF(a, 4), a[5]);
@@ -1287,10 +1279,6 @@ uint32_t UpVertices(const void* src, uint32_t bytes) {
 
 void DrawUp(uint32_t prim, uint32_t count, const void* vertices, uint32_t stride, const uint16_t* indices = nullptr) {
     if (!g_backend || !count || !stride) return;
-    static uint32_t s_draw_cnt = 0;
-    if (s_draw_cnt++ < 10 || (s_draw_cnt % 600 == 0)) {
-        LOGI("d3d: DrawUp #%u, prim=%u count=%u stride=%u idx=%p", s_draw_cnt, prim, count, stride, indices);
-    }
     SyncDeferred();
     // indexed: count is of indices, the ring takes the vertices up to the highest one
     uint32_t used = indices ? *std::max_element(indices, indices + count) + 1u : count;

@@ -117,11 +117,27 @@ function(add_xbe_image target xbe config partitions game_dir)
     set_target_properties(${target} PROPERTIES ENABLE_EXPORTS ON ARCHIVE_OUTPUT_DIRECTORY ${XBE_COMPILER_DIR})
     target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${XBE_SDK_DIR}/runtime ${GEN})
     target_include_directories(${target} SYSTEM PRIVATE ${imgui_SOURCE_DIR})
-    target_compile_options(${target} PRIVATE -fno-strict-aliasing)
-    target_compile_definitions(${target} PRIVATE UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(${target} PRIVATE -fno-strict-aliasing -U_DLL -D_MT $<$<NOT:$<CONFIG:Debug>>:-O2>)
+    target_compile_definitions(${target} PRIVATE UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN $<$<NOT:$<CONFIG:Debug>>:NDEBUG>)
+    target_precompile_headers(${target} PRIVATE
+        <windows.h>
+        <algorithm>
+        <atomic>
+        <cmath>
+        <cstdint>
+        <cstdio>
+        <cstring>
+        <filesystem>
+        <mutex>
+        <string>
+        <vector>
+        "${XBE_SDK_DIR}/runtime/core/log.h"
+        "${XBE_SDK_DIR}/runtime/cpu/x86_context.h"
+        "${XBE_SDK_DIR}/runtime/cpu/x86_ops.h")
+    set_source_files_properties(${XBE_IMGUI_SOURCES} ${XBE_HASH} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
     target_link_libraries(${target} PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:SDL3::SDL3-static> d3d12 dxgi dxguid d3dcompiler xaudio2 ole32 windowscodecs dbghelp winmm dwmapi ws2_32)
     target_link_libraries(${target} PRIVATE ${GEN}/code.lib delayimp)
-    target_link_options(${target} PRIVATE -fuse-ld=lld -g -Wl,/delayload:${target}.dll)
+    target_link_options(${target} PRIVATE -fuse-ld=lld -Wl,/delayload:${target}.dll -Wl,/nodefaultlib:msvcrt -Wl,/nodefaultlib:msvcprt -Wl,/defaultlib:libcmt -Wl,/defaultlib:libcpmt -Wl,/defaultlib:libvcruntime -Wl,/defaultlib:libucrt -Wl,/defaultlib:oldnames)
 
     # without a C runtime: the executable passes on what the code calls
     add_library(${target}_code SHARED ${GEN_SOURCES})
@@ -133,6 +149,7 @@ function(add_xbe_image target xbe config partitions game_dir)
     target_compile_definitions(${target}_code PRIVATE X86_GAME_CODE)
     target_compile_options(${target}_code PRIVATE -fms-compatibility-version=19.40 -O2 -fno-strict-aliasing -nostdinc
         -nostdinc++ -w)
+    target_precompile_headers(${target}_code PRIVATE "${GEN}/x86_recomp_shared.h")
     target_link_libraries(${target}_code PRIVATE ${target})
     target_link_options(${target}_code PRIVATE -fuse-ld=lld -Wl,/noentry,/nodefaultlib,/opt:noicf
         -Wl,/def:${GEN}/exports.def)

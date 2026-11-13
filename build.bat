@@ -73,7 +73,7 @@ set TOOLS_OK=
 set MISSING=
 call "%VSDIR%\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 >nul
 set "VSCMAKE=%VSDIR%\Common7\IDE\CommonExtensions\Microsoft\CMake"
-set "PATH=%VSCMAKE%\CMake\bin;%VSCMAKE%\Ninja;%VSDIR%\VC\Tools\Llvm\x64\bin;%PATH%"
+set "PATH=%LOCALAPPDATA%\Microsoft\WinGet\Links;%VSCMAKE%\CMake\bin;%VSCMAKE%\Ninja;%VSDIR%\VC\Tools\Llvm\x64\bin;%PATH%"
 if exist "%ProgramFiles%\LLVM\bin\clang++.exe" set "PATH=%ProgramFiles%\LLVM\bin;%PATH%"
 where clang++ >nul 2>nul || set MISSING=%MISSING% clang++
 where cmake   >nul 2>nul || set MISSING=%MISSING% cmake

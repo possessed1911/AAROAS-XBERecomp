@@ -24,15 +24,10 @@ bool FixMovieUpdate(X86Context& ctx, uint8_t* base) {
     DWORD tid = GetCurrentThreadId();
     static DWORD s_last_tid = 0;
     static uint32_t s_movie_frames = 0;
-    static uint32_t s_total_movies = 0;
-
-    uint32_t stream = ctx.ecx ? X86_MEM32(ctx.ecx) : 0;
 
     if (tid != s_last_tid) {
         s_last_tid = tid;
         s_movie_frames = 0;
-        s_total_movies++;
-        LOGI("FixMovieUpdate: started movie #%u on thread %lu (stream=%08X)", s_total_movies, (unsigned long)tid, stream);
     }
     s_movie_frames++;
 
@@ -59,17 +54,7 @@ bool FixMovieUpdate(X86Context& ctx, uint8_t* base) {
         skip = kb_skip || pad_skip;
     }
 
-    // In auto-test mode (AA_AUTO_START), auto-skip intro movies after 60 frames (~1.0s) per movie
-    static int s_auto_test = -1;
-    if (s_auto_test == -1) {
-        s_auto_test = (std::getenv("AA_AUTO_START") != nullptr) ? 1 : 0;
-    }
-    if (s_auto_test == 1 && s_movie_frames >= 60) {
-        skip = true;
-    }
-
     if (skip) {
-        LOGI("FixMovieUpdate: skipping movie #%u (stream=%08X, frame %u)", s_total_movies, stream, s_movie_frames);
         ctx.eax = 0; // movie ended
         return true;
     }
@@ -94,16 +79,9 @@ bool FixOverlayUpdate(X86Context& ctx, uint8_t* base) {
     uint32_t pDestRect = X86_MEM32(ctx.esp + 8);
     uint32_t pSrcRect = X86_MEM32(ctx.esp + 12);
 
-    static uint32_t s_overlay_calls = 0;
-    s_overlay_calls++;
-
     if (pOverlay) {
         uint32_t dev = X86_MEM32(0x003CE168);
         uint32_t rt = dev ? X86_MEM32(dev + 0x1A04) : 0; // CDevice_RenderTarget
-        if (s_overlay_calls <= 5) {
-            LOGI("FixOverlayUpdate #%u: pOverlay=%08X pDest=%08X pSrc=%08X dev=%08X rt=%08X",
-                 s_overlay_calls, pOverlay, pDestRect, pSrcRect, dev, rt);
-        }
 
         if (rt) {
             uint32_t src_data = X86_MEM32(pOverlay + 4);
@@ -121,11 +99,6 @@ bool FixOverlayUpdate(X86Context& ctx, uint8_t* base) {
             if (!src_data || !dst_data) {
                 ctx.eax = 0;
                 return true;
-            }
-
-            if (s_overlay_calls <= 5) {
-                LOGI("  Overlay src: %ux%u pitch=%u data=%08X -> dst: %ux%u pitch=%u data=%08X",
-                     src_w, src_h, src_pitch, src_data, dst_w, dst_h, dst_pitch, dst_data);
             }
 
             uint32_t src_va = (src_data < 0x04000000) ? (0x80000000 | src_data) : src_data;
@@ -341,13 +314,11 @@ bool FixSoundAddRef(X86Context& ctx, uint8_t* base) {
 bool FixSoundNullTrack(X86Context& ctx, uint8_t* base) {
     (void)base;
     if (!ctx.ecx) {
-        LOGI("FixSoundNullTrack: ecx is null, returning 0x88780032");
         ctx.eax = 0x88780032;
         return true;
     }
     uint32_t arg0 = X86_MEM32(ctx.esp + 4);
     if (!arg0 || !X86_MEM32(arg0 + 0x70)) {
-        LOGI("FixSoundNullTrack: arg0 or arg0->0x70 is null, returning 0x88780032");
         ctx.eax = 0x88780032;
         return true;
     }
@@ -367,7 +338,6 @@ bool FixSetNotificationPositions(X86Context& ctx, uint8_t* base) {
 bool FixXactTrackNull(X86Context& ctx, uint8_t* base) {
     (void)base;
     if (!ctx.ecx) {
-        LOGI("FixXactTrackNull: ecx is null, returning 0");
         ctx.eax = 0;
         return true;
     }
@@ -379,7 +349,6 @@ bool FixXactTrackNull(X86Context& ctx, uint8_t* base) {
 bool FixXactTrackNull2(X86Context& ctx, uint8_t* base) {
     (void)base;
     if (!ctx.ecx) {
-        LOGI("FixXactTrackNull2: ecx is null, returning 0");
         ctx.eax = 0;
         return true;
     }
@@ -422,7 +391,6 @@ bool FixShaderNull003C0140(X86Context& ctx, uint8_t* base) {
     if (!dev) return true;
     uint32_t vs = X86_MEM32(dev + 0x794u);
     if (!vs) {
-        LOG_FIRST(8, "FixShaderNull003C0140: [dev+0x794] is null, skipping");
         return true;
     }
     return false;
