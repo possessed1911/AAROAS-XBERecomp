@@ -9,7 +9,13 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <deque>
+#include <fstream>
+#include <mutex>
+#include <string>
+#include <vector>
 #include <toml++/toml.hpp>
+#include "imgui.h"
 
 extern "C" {
     __declspec(selectany) char* (*__imp_itoa)(int, char*, int) = _itoa;
@@ -23,6 +29,84 @@ static HWND g_hwnd = nullptr;
 static bool g_mouse_captured = true;
 static std::atomic<float> g_mouse_sensitivity{1.0f};
 static std::atomic<bool> g_mouse_invert_y{false};
+static std::atomic<bool> g_console_open{false};
+static std::atomic<bool> g_stat_fps{false};
+
+namespace ue2_console {
+static std::mutex g_mtx;
+static std::deque<std::string> g_pending;
+static std::vector<std::string> g_history;
+static std::vector<std::string> g_cmd_history;
+static int g_cmd_history_pos = -1;
+
+static void SaveHistoryLocked() {
+    std::ofstream out(app::ExeDir() / "console_history.txt", std::ios::trunc);
+    if (!out) return;
+    for (const auto& c : g_cmd_history) {
+        out << c << '\n';
+    }
+}
+
+static void LoadHistory() {
+    std::lock_guard<std::mutex> lock(g_mtx);
+    std::ifstream in(app::ExeDir() / "console_history.txt");
+    if (!in) return;
+    g_cmd_history.clear();
+    std::string line;
+    while (std::getline(in, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+        if (!line.empty()) g_cmd_history.push_back(line);
+    }
+    if (g_cmd_history.size() > 128) {
+        g_cmd_history.erase(g_cmd_history.begin(), g_cmd_history.end() - 128);
+    }
+    g_cmd_history_pos = -1;
+}
+
+void QueueCommand(const std::string& cmd) {
+    std::lock_guard<std::mutex> lock(g_mtx);
+    if (g_cmd_history.empty() || g_cmd_history.back() != cmd) {
+        g_cmd_history.push_back(cmd);
+        if (g_cmd_history.size() > 128) g_cmd_history.erase(g_cmd_history.begin());
+        SaveHistoryLocked();
+    }
+    g_cmd_history_pos = -1;
+    g_history.push_back("> " + cmd);
+    std::string lower = cmd;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    while (!lower.empty() && (lower.back() == ' ' || lower.back() == '\t')) lower.pop_back();
+    if (lower == "stat fps" || lower == "stat all") {
+        bool next = !g_stat_fps.load(std::memory_order_relaxed);
+        g_stat_fps.store(next, std::memory_order_relaxed);
+        g_history.push_back(next ? "  STAT FPS enabled" : "  STAT FPS disabled");
+        return;
+    }
+    if (lower == "stat none") {
+        g_stat_fps.store(false, std::memory_order_relaxed);
+        g_history.push_back("  STAT FPS disabled");
+        return;
+    }
+    if (lower == "clear" || lower == "cls") {
+        g_history.clear();
+        return;
+    }
+    g_pending.push_back(cmd);
+}
+
+bool PopCommand(std::string& out) {
+    std::lock_guard<std::mutex> lock(g_mtx);
+    if (g_pending.empty()) return false;
+    out = std::move(g_pending.front());
+    g_pending.pop_front();
+    return true;
+}
+
+void AddLog(const std::string& line) {
+    std::lock_guard<std::mutex> lock(g_mtx);
+    g_history.push_back(line);
+    if (g_history.size() > 256) g_history.erase(g_history.begin());
+}
+}  // namespace ue2_console
 
 // Mouse look & capture state
 // SRWLOCK avoids CRT atexit destructor hazards when xapi's background port poller calls HandlePad.
@@ -124,7 +208,6 @@ static void OnLoad(const void* table) {
     const bool invert = t["mouse_invert_y"].value_or(g_mouse_invert_y.load(std::memory_order_relaxed));
     g_mouse_sensitivity.store(sens, std::memory_order_relaxed);
     g_mouse_invert_y.store(invert, std::memory_order_relaxed);
-    LOGI("settings: mouse_sensitivity=%.2f, mouse_invert_y=%d", sens, invert ? 1 : 0);
 }
 
 static void OnSave(void* table) {
@@ -135,6 +218,7 @@ static void OnSave(void* table) {
 }
 
 static void OnInit() {
+    ue2_console::LoadHistory();
     namespace fs = std::filesystem;
     std::error_code ec;
     auto dir = app::ExeDir();
@@ -170,19 +254,16 @@ static void OnWindow(void* hwnd) {
     s_nc_mouse_down = false;
     s_wait_client_entry = false;
     ResetMouseLookStateLocked();
-    LOGI("input: Window registered (%p)", g_hwnd);
     RefreshUiCursor(g_hwnd, CanCaptureLocked(false, IsAltDown()));
 }
 
 static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intptr_t* result) {
     (void)hwnd;
     switch (msg) {
-        case WM_SETCURSOR: {
-            LOGI("cursor: WM_SETCURSOR loword=%u hiword=%u wp=%p", LOWORD(lp), HIWORD(lp), (void*)wp);
+    case WM_SETCURSOR: {
             if (LOWORD(lp) == HTCLIENT) {
                 SrwExclusiveGuard lock(g_capture_lock);
                 const bool can = CanCaptureLocked(true, IsAltDown());
-                LOGI("cursor: WM_SETCURSOR HTCLIENT can=%d", can ? 1 : 0);
                 if (can) {
                     SetCursor(nullptr);
                 } else {
@@ -316,7 +397,6 @@ static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intpt
                 } else {
                     s.display_mode = app::DisplayMode::Windowed;
                 }
-                LOGI("display: Alt+Enter toggled mode to %u", static_cast<uint32_t>(s.display_mode));
                 app::ApplyDisplay();
                 app::Save();
                 if (result) *result = 0;
@@ -334,7 +414,6 @@ static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intpt
                 s_window_active = true;
                 if (!g_mouse_captured) {
                     g_mouse_captured = true;
-                    LOGI("input: Mouse captured on click");
                 }
                 ResetMouseLookStateLocked();
                 RefreshUiCursor(g_hwnd, CanCaptureLocked(false, IsAltDown()));
@@ -342,6 +421,16 @@ static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intpt
             break;
         }
         case WM_KEYDOWN: {
+            if ((wp == VK_OEM_3 || wp == VK_F2) && ((lp & (1LL << 30)) == 0)) {
+                bool open = !g_console_open.load(std::memory_order_relaxed);
+                g_console_open.store(open, std::memory_order_relaxed);
+                if (open) {
+                    SrwExclusiveGuard lock(g_capture_lock);
+                    ReleaseCaptureUiLocked(g_hwnd);
+                }
+                if (result) *result = 0;
+                return true;
+            }
             if (wp == VK_F1) {
                 SrwExclusiveGuard lock(g_capture_lock);
                 g_mouse_captured = !g_mouse_captured;
@@ -351,7 +440,6 @@ static bool OnMessage(void* hwnd, uint32_t msg, uintptr_t wp, intptr_t lp, intpt
                 const bool can = CanCaptureLocked(false, IsAltDown());
                 if (!can) ReleaseCaptureUiLocked(g_hwnd);
                 else RefreshUiCursor(g_hwnd, true);
-                LOGI("input: Mouse capture %s (F1)", g_mouse_captured ? "ENABLED" : "DISABLED");
                 return false;
             }
             break;
@@ -543,81 +631,81 @@ static void HandlePad(int port, input::Pad& pad) {
     if (is_down(VK_LEFT) || is_down('Q') || is_down('Z')) { pad.buttons |= 0x0004; kb_used = true; }
     if (is_down(VK_RIGHT) || is_down('E')) { pad.buttons |= 0x0008; kb_used = true; }
 
-    // Check environment variable or auto-press for self-test
-    static int s_auto_start = -1;
-    if (s_auto_start == -1) {
-        s_auto_start = (std::getenv("AA_AUTO_START") != nullptr) ? 1 : 0;
-    }
-    if (s_auto_start >= 1) {
-        static uint32_t auto_frame = 0;
-        auto_frame++;
-        if (auto_frame >= 250 && auto_frame <= 280) {
-            pad.buttons |= 0x0010; // START
-            pad.analog[0] = 0xFF;  // A
-            static bool s_logged_auto = false;
-            if (!s_logged_auto) {
-                s_logged_auto = true;
-                LOGI("input: Auto-pressing START / A on Press Start screen!");
-            }
-        } else if (auto_frame >= 500 && auto_frame <= 530) {
-            pad.analog[0] = 0xFF;  // A
-            static bool s_logged_500 = false;
-            if (!s_logged_500) {
-                s_logged_500 = true;
-                LOGI("input: Auto-pressing A on Main Menu!");
-            }
-        } else if (auto_frame >= 700 && auto_frame <= 730) {
-            pad.analog[0] = 0xFF;  // A
-            static bool s_logged_700 = false;
-            if (!s_logged_700) {
-                s_logged_700 = true;
-                LOGI("input: Auto-pressing A on Sub-Menu / Profile!");
-            }
-        } else if (auto_frame >= 900 && auto_frame <= 930) {
-            pad.analog[0] = 0xFF;  // A
-            static bool s_logged_900 = false;
-            if (!s_logged_900) {
-                s_logged_900 = true;
-                LOGI("input: Auto-pressing A to confirm / start level!");
-            }
-        } else if (auto_frame >= 1100 && auto_frame <= 1130) {
-            pad.analog[0] = 0xFF;  // A
-            static bool s_logged_1100 = false;
-            if (!s_logged_1100) {
-                s_logged_1100 = true;
-                LOGI("input: Auto-pressing A on Mission Select!");
-            }
-        } else if (auto_frame >= 1400 && auto_frame <= 1430) {
-            pad.analog[0] = 0xFF;  // A
-            pad.buttons |= 0x0010; // START
-            static bool s_logged_1400 = false;
-            if (!s_logged_1400) {
-                s_logged_1400 = true;
-                LOGI("input: Auto-pressing A / START on Mission Select 1!");
-            }
-        } else if (auto_frame >= 1550 && auto_frame <= 1580) {
-            pad.analog[0] = 0xFF;  // A
-            pad.buttons |= 0x0010; // START
-            static bool s_logged_1550 = false;
-            if (!s_logged_1550) {
-                s_logged_1550 = true;
-                LOGI("input: Auto-pressing A / START on Mission Select 2!");
-            }
-        } else if (auto_frame >= 1700 && auto_frame <= 1730) {
-            pad.analog[0] = 0xFF;  // A
-            pad.buttons |= 0x0010; // START
-            static bool s_logged_1700 = false;
-            if (!s_logged_1700) {
-                s_logged_1700 = true;
-                LOGI("input: Auto-pressing A / START on Mission Select 3!");
-            }
-        } else if (auto_frame == 2300) {
-            gpu::g_capture = true;
-            LOGI("capture: Auto-capturing in-game 3D gameplay frame!");
+    if (port == 0 || kb_used) pad.connected = true;
+}
+
+static void OnUI(double fps) {
+    if (g_stat_fps.load(std::memory_order_relaxed)) {
+        ImGuiViewport* vp = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - 12.0f, vp->WorkPos.y + 12.0f),
+                                ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+        ImGui::SetNextWindowBgAlpha(0.45f);
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                                 ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs;
+        if (ImGui::Begin("##StatFpsOverlay", nullptr, flags)) {
+            double ms = (fps > 0.0) ? (1000.0 / fps) : 0.0;
+            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "%.1f FPS (%.2f ms)", fps, ms);
         }
+        ImGui::End();
     }
 
-    if (port == 0 || kb_used) pad.connected = true;
+    if (!g_console_open.load(std::memory_order_relaxed)) return;
+
+    ImGui::SetNextWindowSize(ImVec2(640, 320), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("UE2 Console (~ / F2)", nullptr, ImGuiWindowFlags_NoCollapse)) {
+        ImGui::BeginChild("History", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 4), true);
+        {
+            std::lock_guard<std::mutex> lock(ue2_console::g_mtx);
+            for (const auto& line : ue2_console::g_history) {
+                ImGui::TextUnformatted(line.c_str());
+            }
+        }
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
+        ImGui::EndChild();
+
+        static char buf[512] = {};
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        auto history_cb = [](ImGuiInputTextCallbackData* data) -> int {
+            if (data->EventFlag == ImGuiInputTextFlags_CallbackHistory) {
+                std::lock_guard<std::mutex> lock(ue2_console::g_mtx);
+                const int count = static_cast<int>(ue2_console::g_cmd_history.size());
+                if (count == 0) return 0;
+                int prev_pos = ue2_console::g_cmd_history_pos;
+                if (data->EventKey == ImGuiKey_UpArrow) {
+                    if (ue2_console::g_cmd_history_pos == -1) {
+                        ue2_console::g_cmd_history_pos = count - 1;
+                    } else if (ue2_console::g_cmd_history_pos > 0) {
+                        ue2_console::g_cmd_history_pos--;
+                    }
+                } else if (data->EventKey == ImGuiKey_DownArrow) {
+                    if (ue2_console::g_cmd_history_pos != -1) {
+                        if (++ue2_console::g_cmd_history_pos >= count) {
+                            ue2_console::g_cmd_history_pos = -1;
+                        }
+                    }
+                }
+                if (prev_pos != ue2_console::g_cmd_history_pos) {
+                    const char* text = (ue2_console::g_cmd_history_pos >= 0)
+                                           ? ue2_console::g_cmd_history[ue2_console::g_cmd_history_pos].c_str()
+                                           : "";
+                    data->DeleteChars(0, data->BufTextLen);
+                    data->InsertChars(0, text);
+                }
+            }
+            return 0;
+        };
+        ImGuiInputTextFlags input_flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory;
+        if (ImGui::InputText("##cmd", buf, sizeof(buf), input_flags, history_cb)) {
+            if (buf[0] != '\0') {
+                ue2_console::QueueCommand(buf);
+                buf[0] = '\0';
+            }
+            ImGui::SetKeyboardFocusHere(-1);
+        }
+    }
+    ImGui::End();
 }
 
 // what the runtime asks of the game; strings must be set, hooks may stay null
@@ -637,7 +725,7 @@ const app::GameInfo app::kGame = {
     .loaded = nullptr,                    // image in memory, before its entry point runs
     .window = OnWindow,                   // the game window is up
     .message = OnMessage,                 // window messages first; true takes one
-    .ui = nullptr,                        // ImGui drawing each frame
+    .ui = OnUI,                           // ImGui drawing each frame
     .pad = HandlePad,                     // changes a polled pad
     .rumble = nullptr,                    // changes a rumble before it is set
 };

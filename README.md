@@ -16,6 +16,7 @@ Built using the [Xbox XBE Recomp](https://github.com/TGP482/XboxXBERecomp) frame
 - [Controls](#controls)
   - [Mouse & Keyboard (PC FPS)](#mouse--keyboard-pc-fps)
   - [Controller (Gamepad)](#controller-gamepad)
+  - [Developer & Debug Console](#developer--debug-console)
 - [Video Playback & Presentation](#video-playback--presentation)
 - [Multiplayer & Online Play](#multiplayer--online-play)
   - [Method 1: XLink Kai (Global Matchmaking)](#method-1-xlink-kai-global-matchmaking)
@@ -105,12 +106,23 @@ Unlike conventional arcade shooters, *Rise of a Soldier* emphasizes authentic mi
 | **Lean Left / Right** | `Q` / `E` or `←` / `→` (`Z` Left) | D-Pad Left / Right |
 | **Toggle Cursor Lock** | **`F1`** | *(Toggles mouse lock on/off)* |
 | **Toggle Display Mode** | **`Alt + Enter`** | *(Toggles windowed / borderless fullscreen)* |
+| **Toggle In-Game Console** | **`~` (Tilde)** or **`F2`** | *(Opens/closes Unreal Engine 2 console)* |
 
 > [!TIP]
 > - Press **`Alt + Enter`** at any time to seamlessly toggle between windowed mode and borderless fullscreen.
+> - Press **`~` (Tilde)`** or **`F2`** to open the in-game developer console for cheats, stats, and debug commands.
 > - The mouse cursor is automatically locked and hidden during gameplay in both windowed and fullscreen modes.
 > - When you **Alt-Tab**, minimize, or defocus the game window, the cursor is automatically freed and restored to a standard arrow.
 > - Clicking back into the game window automatically re-engages mouse lock and re-hides the cursor. You can also press **`F1`** at any time to toggle mouse capture manually.
+
+### Developer & Debug Console
+
+The recompilation includes an interactive Unreal Engine 2 console window powered by Dear ImGui.
+- **Toggle Console**: Press **`~`** (Tilde / Grave) or **`F2`**.
+- **Command History**: Press **`Up Arrow`** or **`Down Arrow`** in the command prompt to cycle through previously submitted commands. Command history is saved across restarts in `console_history.txt`.
+- **Performance Overlay**: Run `stat fps` or `stat all` to toggle the real-time FPS overlay; `stat none` hides it.
+- **Cheats & Level Commands**: Dispatches directly through UE2's `UViewport::Exec` and `UPlayer::Exec` handlers (e.g. `god`, `fly`, `ghost`, `walk`, `mpcheat god`, `mpcheat changeclass <r|g|ar|s|sf>`, `open <map>`).
+- For a full listing of supported console commands and parameters, see **[CONSOLE_COMMANDS.md](CONSOLE_COMMANDS.md)**.
 
 ### Controller (Gamepad)
 

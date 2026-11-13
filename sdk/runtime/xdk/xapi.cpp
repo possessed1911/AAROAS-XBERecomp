@@ -88,6 +88,24 @@ HLE_STDCALL(XInputClose, 1) {
     return 0;
 }
 
+namespace dispatch {
+uint32_t HostThunk(X86Func* fn);
+}
+
+namespace ue2_console {
+bool PopCommand(std::string& out);
+void AddLog(const std::string& line);
+}
+
+static void Ue2OutputSerialize(X86Context& ctx, uint8_t* /*base*/) {
+    uint32_t str_va = kernel::R32(ctx.esp + 4);
+    if (str_va && mem::IsCommitted(str_va)) {
+        std::string msg = kernel::ReadCString(str_va, 1024);
+        if (!msg.empty()) ue2_console::AddLog("  " + msg);
+    }
+    kernel::Return(ctx, 0, 2);
+}
+
 HLE_STDCALL(XInputGetState, 2) {
     uint32_t port;
     {
@@ -95,6 +113,61 @@ HLE_STDCALL(XInputGetState, 2) {
         auto it = g_handles.find(a[0]);
         if (it == g_handles.end()) return 6;  // ERROR_INVALID_HANDLE
         port = it->second.port;
+    }
+    if (port == 0) {
+        std::string cmd;
+        while (ue2_console::PopCommand(cmd)) {
+            static bool s_zero_page_committed = false;
+            if (!s_zero_page_committed) {
+                mem::Commit(0, 0x1000);
+                s_zero_page_committed = true;
+            }
+            uint32_t engine = R32(0x0075CF7Cu);
+            if (!engine) engine = R32(0x00744CD8u);
+            if (!engine || !mem::IsCommitted(engine)) {
+                ue2_console::AddLog("[err] GEngine not initialized yet");
+                break;
+            }
+            // Prefer UViewport::Exec (Viewport + 0x30), which routes through UInput, UConsole,
+            // UPlayer/Actor/CheatManager UnrealScript exec functions, and chains to GEngine->Exec.
+            uint32_t exec_this = 0;
+            uint32_t exec_fn = 0;
+            uint32_t client = R32(engine + 0x4Cu);
+            if (client && mem::IsCommitted(client)) {
+                uint32_t vp_data = R32(client + 0x30u);
+                uint32_t vp_num = R32(client + 0x34u);
+                if (vp_num > 0 && vp_data && mem::IsCommitted(vp_data)) {
+                    uint32_t viewport = R32(vp_data);
+                    if (viewport && mem::IsCommitted(viewport)) {
+                        exec_this = viewport + 0x30u;
+                        uint32_t vtbl = R32(exec_this);
+                        if (vtbl && mem::IsCommitted(vtbl)) exec_fn = R32(vtbl);
+                    }
+                }
+            }
+            if (!exec_this || !exec_fn) {
+                exec_this = engine + 0x2Cu;
+                uint32_t vtbl = R32(exec_this);
+                exec_fn = (vtbl && mem::IsCommitted(vtbl)) ? R32(vtbl) : 0x001A2F20u;
+            }
+            X86Context saved_ctx = ctx;
+            ctx.esp -= 1024;
+            uint32_t scratch = ctx.esp;
+            uint32_t cmd_va = scratch;
+            size_t len = (std::min)(cmd.size(), size_t(511));
+            std::memcpy(HostPtr(cmd_va), cmd.data(), len);
+            *reinterpret_cast<char*>(HostPtr(cmd_va + len)) = '\0';
+            uint32_t ar_va = scratch + 512;
+            uint32_t vtbl_va = scratch + 528;
+            W32(ar_va, vtbl_va);
+            uint32_t serialize_thunk = dispatch::HostThunk(Ue2OutputSerialize);
+            W32(vtbl_va + 0, serialize_thunk);
+            for (uint32_t i = 1; i < 8; ++i) W32(vtbl_va + i * 4, 0x0011C420u);
+            ctx.ecx = exec_this;
+            uint32_t ok = CallGuest(ctx, exec_fn, {cmd_va, ar_va});
+            ctx = saved_ctx;
+            if (!ok) ue2_console::AddLog("[unrecognized]");
+        }
     }
     input::Pad p = input::Poll(int(port));
     if (!p.connected) return 1167;  // ERROR_DEVICE_NOT_CONNECTED

@@ -106,7 +106,6 @@ void ApplyNow() {
     ClipCursor(nullptr);
     SetCursor(nullptr);
     const Settings& s = Get();
-    LOGI("display: ApplyNow mode=%u hwnd=%p", static_cast<uint32_t>(s.display_mode), g_hwnd);
     HMONITOR mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFOEXW mi{};
     mi.cbSize = sizeof(mi);
@@ -224,7 +223,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_apply_posted = false;
             return 0;
         case kSetCursorVisible:
-            LOGI("cursor: kSetCursorVisible(%llu) tid=%lu", wp, GetCurrentThreadId());
             if (wp) {
                 SetCursor(LoadCursorW(nullptr, IDC_ARROW));
             } else {
@@ -232,7 +230,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case kOpenWindow:
-            LOGI("cursor: kOpenWindow tid=%lu", GetCurrentThreadId());
             CloseSplash();
             if (wp) ApplyNow();
             ShowWindow(hwnd, SW_SHOWNORMAL);
